@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GreenMind: Deep RL for Sustainable Buildings</title>
+  <link rel="stylesheet" href="index.css">
+  <!-- Chart.js CDN for live telemetry visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="top-nav">
+    <div class="brand">
+      <div class="logo-icon">🌿</div>
+      <div class="brand-text">
+        <h1>GreenMind BMS Digital Twin</h1>
+        <p>Deep Reinforcement Learning (PPO) Building Climate & Energy Optimization</p>
+      </div>
+    </div>
+    <div class="nav-badges">
+      <div class="badge badge-green">
+        <span class="pulse-dot"></span>
+        <span id="nav-system-status">System Online: Live Digital Twin</span>
+      </div>
+      <div class="badge badge-purple" id="nav-active-agent-badge">
+        Controller: PPO (Continuous)
+      </div>
+    </div>
+  </header>
+
+  <!-- Main 3-Column Dashboard Grid -->
+  <main class="dashboard-grid">
+    
+    <!-- Left Column: Zone Sensor Telemetry -->
+    <section class="card">
+      <div class="card-title">
+        <span>Zone Telemetry (Real-Time)</span>
+        <span style="font-size: 11px; color: var(--emerald);">UCI + Weather Sensors</span>
+      </div>
+
+      <div class="metric-row">
+        <!-- Indoor Temperature -->
+        <div class="metric-box active-comfort" id="box-temp">
+          <div>
+            <div class="metric-label">Indoor Temperature</div>
+            <div class="metric-sub">Comfort Zone: 21.0°C – 24.0°C</div>
+          </div>
+          <div class="metric-val" id="val-indoor-temp">22.5<span>°C</span></div>
+        </div>
+
+        <!-- Indoor CO2 -->
+        <div class="metric-box active-iaq" id="box-co2">
+          <div>
+            <div class="metric-label">Indoor Air Quality (CO₂)</div>
+            <div class="metric-sub">Threshold: &lt; 1000 ppm</div>
+          </div>
+          <div class="metric-val" id="val-co2">650<span>ppm</span></div>
+        </div>
+
+        <!-- Indoor Humidity -->
+        <div class="metric-box">
+          <div>
+            <div class="metric-label">Indoor Humidity</div>
+            <div class="metric-sub">Relative Humidity (RH)</div>
+          </div>
+          <div class="metric-val" id="val-humidity">48.2<span>%</span></div>
+        </div>
+
+        <!-- Occupancy Headcount -->
+        <div class="metric-box">
+          <div>
+            <div class="metric-label">Zone Occupancy</div>
+            <div class="metric-sub" id="label-occ-status">Status: Occupied</div>
+          </div>
+          <div class="metric-val" id="val-occupants">4<span>people</span></div>
+        </div>
+
+        <!-- Outdoor Weather -->
+        <div class="metric-box">
+          <div>
+            <div class="metric-label">Ambient Weather</div>
+            <div class="metric-sub" id="label-weather-detail">Solar PV: 3.2 kW</div>
+          </div>
+          <div class="metric-val" id="val-outdoor-temp">29.4<span>°C</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Center Column: Digital Twin BMS Actuators & MDP State -->
+    <section class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <div class="card-title">
+          <span>Continuous BMS Actuators</span>
+          <span style="font-size: 11px; color: var(--cyan);">Real-Time Modulation</span>
+        </div>
+
+        <!-- Actuator Progress Bars -->
+        <div class="actuators-container">
+          <!-- Chilled Water Valve -->
+          <div class="actuator-item">
+            <div class="actuator-header">
+              <span>❄️ Chilled-Water Valve</span>
+              <span class="actuator-percent" id="pct-valve">40.0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill fill-valve" id="bar-valve" style="width: 40%;"></div>
+            </div>
+          </div>
+
+          <!-- Variable Speed Supply Fan -->
+          <div class="actuator-item">
+            <div class="actuator-header">
+              <span><span class="fan-spinner" id="fan-icon">🌀</span> Supply Air Fan Speed</span>
+              <span class="actuator-percent" id="pct-fan">60.0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill fill-fan" id="bar-fan" style="width: 60%;"></div>
+            </div>
+          </div>
+
+          <!-- Outdoor Air Damper -->
+          <div class="actuator-item">
+            <div class="actuator-header">
+              <span>💨 Fresh-Air Outdoor Damper</span>
+              <span class="actuator-percent" id="pct-damper">30.0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill fill-damper" id="bar-damper" style="width: 30%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Discrete MDP State Space Representation (Pages 2-8 of Paper) -->
+        <div style="margin-top: 24px;">
+          <div class="card-title" style="margin-bottom: 8px;">
+            <span>GreenMind MDP Operational State</span>
+            <span style="font-size: 11px; color: var(--purple);">States S1 – S8</span>
+          </div>
+          <div class="states-flow">
+            <div class="state-pill active" id="pill-s1">S1: Comfort Zone</div>
+            <div class="state-pill" id="pill-s2">S2: Overheated</div>
+            <div class="state-pill" id="pill-s3">S3: Overcooled</div>
+            <div class="state-pill" id="pill-s4">S4: Stuffy (CO₂)</div>
+            <div class="state-pill" id="pill-s5">S5: Critical (Hot+CO₂)</div>
+            <div class="state-pill" id="pill-s6">S6: Unoccupied</div>
+            <div class="state-pill" id="pill-s7">S7: Safety Limit</div>
+            <div class="state-pill" id="pill-s8">S8: Green Day 🌟</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Electrical Energy Telemetry -->
+      <div style="background: rgba(0,0,0,0.3); border-radius: var(--radius-md); padding: 12px 16px; margin-top: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border-color);">
+        <div>
+          <span style="font-size: 11px; color: var(--text-muted);">Total Energy Consumed:</span>
+          <div style="font-size: 20px; font-weight: 700; color: #38bdf8;" id="val-energy-total">0.00 kWh</div>
+        </div>
+        <div>
+          <span style="font-size: 11px; color: var(--text-muted);">Current HVAC Draw:</span>
+          <div style="font-size: 20px; font-weight: 700; color: #f59e0b;" id="val-power-kw">0.00 kW</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Interactive Controls & Disturbance Testing -->
+    <section class="card controls-card">
+      <div class="card-title">
+        <span>Operator Control Cockpit</span>
+        <span style="font-size: 11px; color: var(--text-dim);">RL Controller</span>
+      </div>
+
+      <!-- Agent Selection Dropdown -->
+      <div class="select-agent-group">
+        <label for="agent-selector">Active Control Policy:</label>
+        <select id="agent-selector" class="custom-select">
+          <option value="PPO" selected>Proximal Policy Optimization (PPO ⭐ Continuous)</option>
+          <option value="Policy Iteration">Analytical Policy Iteration (MDP Benchmark)</option>
+          <option value="Rule-Based">Traditional Rule-Based Control (RBC Baseline)</option>
+        </select>
+      </div>
+
+      <!-- Simulation Playback Buttons -->
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-step">▶ Step (+15m)</button>
+        <button class="btn btn-secondary" id="btn-autorun">⚡ Auto-Run</button>
+      </div>
+      <button class="btn btn-secondary" id="btn-reset" style="width: 100%;">🔄 Reset 24-Hr Cycle</button>
+
+      <!-- What-If Disturbance Injection (Novelty #5) -->
+      <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 6px;">
+        <div class="card-title" style="margin-bottom: 10px;">
+          <span>"What-If" Stress Test</span>
+          <span style="font-size: 11px; color: var(--rose);">Disturbances</span>
+        </div>
+
+        <div class="slider-group">
+          <label>Outdoor Heatwave: <span id="label-heatwave-val">34.0°C</span></label>
+          <input type="range" id="slider-heatwave" min="20" max="42" step="0.5" value="34.0">
+        </div>
+
+        <div class="slider-group" style="margin-top: 12px;">
+          <label>Occupant Crowd Surge: <span id="label-crowd-val">15 people</span></label>
+          <input type="range" id="slider-crowd" min="0" max="25" step="1" value="15">
+        </div>
+
+        <button class="btn btn-secondary" id="btn-inject-perturb" style="width: 100%; margin-top: 14px; border-color: rgba(244, 63, 94, 0.4); color: #fca5a5;">
+          💥 Inject Environmental Disturbance
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Section: Telemetry Chart & Benchmark Comparison -->
+  <section class="charts-grid">
+    
+    <!-- Model-Based vs Model-Free Comparative Trajectory -->
+    <div class="card">
+      <div class="card-title">
+        <span>Model-Based (MDP Policy Iteration) vs. Model-Free Deep RL (PPO)</span>
+        <div style="display: flex; gap: 8px;">
+          <button class="badge" id="btn-chart-energy" style="cursor: pointer; background: rgba(16, 185, 129, 0.2); color: #34d399;">Power (kW)</button>
+          <button class="badge" id="btn-chart-temp" style="cursor: pointer; background: rgba(255, 255, 255, 0.05); color: #9ca3af;">Temp (°C)</button>
+          <button class="badge" id="btn-chart-co2" style="cursor: pointer; background: rgba(255, 255, 255, 0.05); color: #9ca3af;">CO₂ (ppm)</button>
+        </div>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="comparisonChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Multi-Agent Benchmark Table (RBC vs PI vs PPO) -->
+    <div class="card">
+      <div class="card-title">
+        <span>Performance Benchmark</span>
+        <span style="font-size: 11px; color: var(--emerald);">Comparative Summary</span>
+      </div>
+
+      <table class="benchmark-table">
+        <thead>
+          <tr>
+            <th>Paradigm / Controller</th>
+            <th>Energy</th>
+            <th>Saved</th>
+            <th>Discomfort</th>
+            <th>Jitter</th>
+          </tr>
+        </thead>
+        <tbody id="benchmark-table-body">
+          <tr>
+            <td><strong>Model-Free: PPO ⭐</strong></td>
+            <td id="b-ppo-energy">1.47 kWh</td>
+            <td style="color: var(--emerald); font-weight:700;" id="b-ppo-saved">+92.8%</td>
+            <td id="b-ppo-disc">2.50 hrs</td>
+            <td id="b-ppo-jit">0.0107</td>
+          </tr>
+          <tr>
+            <td><strong>Model-Based: Policy Iteration</strong></td>
+            <td id="b-pi-energy">6.30 kWh</td>
+            <td style="color: var(--cyan); font-weight:700;" id="b-pi-saved">+69.1%</td>
+            <td id="b-pi-disc">9.00 hrs</td>
+            <td id="b-pi-jit">0.0087</td>
+          </tr>
+          <tr>
+            <td><strong>Baseline: Rule-Based (RBC)</strong></td>
+            <td id="b-rbc-energy">20.36 kWh</td>
+            <td style="color: var(--text-dim);" id="b-rbc-saved">Baseline</td>
+            <td id="b-rbc-disc">9.25 hrs</td>
+            <td id="b-rbc-jit">0.0611</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top: 14px; padding: 12px; background: rgba(16, 185, 129, 0.08); border-radius: var(--radius-sm); border: 1px solid rgba(16, 185, 129, 0.2); font-size: 11px; line-height: 1.5; color: #a7f3d0;">
+        🔬 <strong>Model-Based vs Model-Free Insight:</strong><br>
+        • <strong>Model-Based (Policy Iteration)</strong> uses the pre-set theoretical transition matrix $P(s'|s,a)$ to optimize discrete modes.<br>
+        • <strong>Model-Free (PPO ⭐)</strong> uses continuous clipped actor-critic networks to achieve <strong>92.8% energy reduction</strong> while drastically reducing thermal discomfort.
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

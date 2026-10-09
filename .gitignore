@@ -1,0 +1,16 @@
+# Large datasets exceeding GitHub's 100MB limit & submodules
+kaggle.txt
+*.zip
+GreenMind-RL-Building-Control/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment and IDE settings
+.vscode/
+.idea/
+*.swp
+.DS_Store
