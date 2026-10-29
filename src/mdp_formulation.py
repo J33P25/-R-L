@@ -32,6 +32,41 @@ ACTIONS_PER_STATE = {
     7: ["None (Terminal)"]
 }
 
+# Physical actuator command mapping for discrete MDP policy actions: [valve, fan, damper]
+# Formally grounds discrete theoretical Policy Iteration into the continuous physical HVAC domain.
+DISCRETE_ACTION_PHYSICAL_MAPPING = {
+    0: { # S1 (Comfort Zone)
+        0: np.array([0.25, 0.35, 0.25], dtype=np.float32), # A1 Maintain
+        1: np.array([0.15, 0.20, 0.15], dtype=np.float32), # A2 Eco Setting
+        2: np.array([0.25, 0.50, 0.65], dtype=np.float32), # A3 Ventilation Boost
+    },
+    1: { # S2 (Overheated)
+        0: np.array([0.85, 0.80, 0.25], dtype=np.float32), # B1 Set Cooling
+        1: np.array([0.55, 0.60, 0.50], dtype=np.float32), # B2 Cooling and Ventilation
+        2: np.array([0.20, 0.65, 0.80], dtype=np.float32), # B3 Vent Only
+    },
+    2: { # S3 (Overcooled)
+        0: np.array([0.05, 0.20, 0.20], dtype=np.float32), # C1 Less Cooling
+        1: np.array([0.00, 0.30, 0.15], dtype=np.float32), # C2 Set Heating
+        2: np.array([0.10, 0.15, 0.10], dtype=np.float32), # C3 Wait
+    },
+    3: { # S4 (Stuffy)
+        0: np.array([0.25, 0.65, 0.75], dtype=np.float32), # D1 Boost Air
+        1: np.array([0.30, 0.90, 1.00], dtype=np.float32), # D2 Set Ventilation
+        2: np.array([0.20, 0.30, 0.20], dtype=np.float32), # D3 Do Nothing
+    },
+    4: { # S5 (Critical)
+        0: np.array([0.85, 0.90, 0.85], dtype=np.float32), # E1 Set Cooling and Vent
+        1: np.array([0.90, 0.70, 0.25], dtype=np.float32), # E2 Set Cooling Only
+        2: np.array([0.25, 0.85, 0.90], dtype=np.float32), # E3 Full Vent Only
+    },
+    5: { # S6 (Unoccupied Empty Room)
+        0: np.array([0.05, 0.10, 0.05], dtype=np.float32), # F1 Standby / On Hold
+        1: np.array([0.00, 0.00, 0.00], dtype=np.float32), # F2 Switch Off
+        2: np.array([0.45, 0.50, 0.25], dtype=np.float32), # F3 Pre-Condition Air
+    }
+}
+
 def classify_state(temperature: float, co2: float, occupancy: int) -> int:
     """
     Maps continuous sensor readings to discrete GreenMind states S1-S8.

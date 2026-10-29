@@ -200,10 +200,10 @@ class SACReplayBuffer:
         return len(self.buffer)
 
 class SACAgent:
-    def __init__(self, obs_dim=8, action_dim=3, lr=3e-4, gamma=0.95, tau=0.005, alpha=0.2):
+    def __init__(self, obs_dim=8, action_dim=3, lr=3e-4, gamma=0.95, tau=0.005, alpha=0.2, auto_alpha=True):
         self.gamma = gamma
         self.tau = tau
-        self.alpha = alpha
+        self.auto_alpha = auto_alpha
 
         self.actor = SoftActor(obs_dim, action_dim).to(device)
         self.critic = SoftCritic(obs_dim, action_dim).to(device)
@@ -213,6 +213,14 @@ class SACAgent:
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=lr)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=lr)
         self.replay_buffer = SACReplayBuffer()
+
+        if self.auto_alpha:
+            self.target_entropy = -float(action_dim)
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
+            self.alpha_opt = optim.Adam([self.log_alpha], lr=lr)
+            self.alpha = self.log_alpha.exp().item()
+        else:
+            self.alpha = alpha
 
     def act(self, obs, deterministic=False):
         obs_t = torch.FloatTensor(obs).unsqueeze(0).to(device)
@@ -251,7 +259,15 @@ class SACAgent:
         actor_loss.backward()
         self.actor_opt.step()
 
-        # 3. Soft Update Target Critic (Polyak)
+        # 3. Automatic Entropy Adjustment
+        if self.auto_alpha:
+            alpha_loss = -(self.log_alpha * (log_p + self.target_entropy).detach()).mean()
+            self.alpha_opt.zero_grad()
+            alpha_loss.backward()
+            self.alpha_opt.step()
+            self.alpha = float(self.log_alpha.exp().item())
+
+        # 4. Soft Update Target Critic (Polyak)
         for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
 

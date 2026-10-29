@@ -28,9 +28,9 @@ class RuleBasedController:
             co2 = info["co2_ppm"]
             occupants = info["occupants"]
         else:
-            t_in = obs[0]
-            co2 = obs[2] * 2000.0
-            occupants = int(round(obs[3] * 20.0))
+            t_in = obs[0] * 10.0 + 22.5
+            co2 = obs[2] * 1600.0 + 400.0
+            occupants = int(round(obs[3] * 15.0))
 
         # 1. Unoccupied Rule: Deep Setback
         if occupants == 0:

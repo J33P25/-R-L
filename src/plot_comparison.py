@@ -105,10 +105,11 @@ def generate_comparison_plots():
     ax3.set_title("3. Indoor Temperature Trajectory (°C)", fontsize=12, fontweight='bold', pad=10)
     ax3.set_xlabel("Time of Day (Hours)", fontsize=11)
     ax3.set_ylabel("Temperature (°C)", fontsize=11)
-    ax3.set_xlim(0, 24)
-    ax3.set_ylim(19.5, 26.5)
+    all_temps = (rbc["history"]["indoor_temp"] + pi["history"]["indoor_temp"] +
+                 ppo["history"]["indoor_temp"] + sac["history"]["indoor_temp"])
+    ax3.set_ylim(min(18.0, min(all_temps) - 1.0), max(28.0, max(all_temps) + 1.0))
     ax3.set_xticks(range(0, 25, 4))
-    ax3.legend(loc="lower right", framealpha=0.9, fontsize=9)
+    ax3.legend(loc="upper right", framealpha=0.9, fontsize=9)
     ax3.grid(True, linestyle=":", alpha=0.6)
 
     # -------------------------------------------------------------

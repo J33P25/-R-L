@@ -16,7 +16,7 @@
       <div class="logo-icon">🌿</div>
       <div class="brand-text">
         <h1>GreenMind BMS Digital Twin</h1>
-        <p>Deep Reinforcement Learning (PPO) Building Climate & Energy Optimization</p>
+        <p>Deep Reinforcement Learning (SAC + PPO) Building Climate & Energy Optimization</p>
       </div>
     </div>
     <div class="nav-badges">
@@ -25,7 +25,7 @@
         <span id="nav-system-status">System Online: Live Digital Twin</span>
       </div>
       <div class="badge badge-purple" id="nav-active-agent-badge">
-        Controller: PPO (Continuous)
+        Controller: SAC (Continuous)
       </div>
     </div>
   </header>
@@ -37,7 +37,7 @@
     <section class="card">
       <div class="card-title">
         <span>Zone Telemetry (Real-Time)</span>
-        <span style="font-size: 11px; color: var(--emerald);">UCI + Weather Sensors</span>
+        <span style="font-size: 11px; color: var(--emerald);">BDG2 Panther Telemetry</span>
       </div>
 
       <div class="metric-row">
@@ -175,7 +175,8 @@
       <div class="select-agent-group">
         <label for="agent-selector">Active Control Policy:</label>
         <select id="agent-selector" class="custom-select">
-          <option value="PPO" selected>Proximal Policy Optimization (PPO ⭐ Continuous)</option>
+          <option value="SAC" selected>Soft Actor-Critic (SAC ⭐ Maximum Entropy)</option>
+          <option value="PPO">Proximal Policy Optimization (PPO Continuous)</option>
           <option value="Policy Iteration">Analytical Policy Iteration (MDP Benchmark)</option>
           <option value="Rule-Based">Traditional Rule-Based Control (RBC Baseline)</option>
         </select>

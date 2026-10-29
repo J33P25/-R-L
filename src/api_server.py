@@ -22,8 +22,11 @@ from src.config import BASE_DIR, LOGS_DIR
 from src.data_loader import build_unified_dataset
 from src.building_env import GreenMindBuildingEnv
 from src.rule_based_agent import RuleBasedController
-from src.rl_agents import PPOAgent
-from src.mdp_formulation import build_mdp, solve_policy_iteration, classify_state
+from src.rl_agents import PPOAgent, SACAgent
+from src.mdp_formulation import (
+    build_mdp, solve_policy_iteration, classify_state,
+    DISCRETE_ACTION_PHYSICAL_MAPPING
+)
 
 PORT = 8000
 DASHBOARD_DIR = BASE_DIR / "dashboard"
@@ -32,7 +35,7 @@ DASHBOARD_DIR = BASE_DIR / "dashboard"
 sim_data = None
 sim_env = None
 agents = {}
-current_agent_name = "PPO"
+current_agent_name = "SAC"
 sim_history = []
 
 def init_simulation():
@@ -49,11 +52,15 @@ def init_simulation():
     ppo.load("ppo_greenmind.pt")
     agents["PPO"] = ppo
 
+    sac = SACAgent()
+    sac.load("sac_greenmind.pt")
+    agents["SAC"] = sac
+
     P, R = build_mdp()
     pi_policy, _, _ = solve_policy_iteration(P, R)
     agents["Policy Iteration"] = pi_policy
 
-    print("[Server] All agents initialized.")
+    print("[Server] All agents initialized (Rule-Based, Policy Iteration, PPO, SAC).")
 
 class GreenMindHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -126,7 +133,8 @@ class GreenMindHandler(SimpleHTTPRequestHandler):
             "occupants": int(sim_env.occupants),
             "outdoor_temp": round(float(sim_env.t_out), 2),
             "outdoor_humidity": round(float(sim_env.rh_out), 1),
-            "solar_kw": round(float(sim_env.solar_kw), 2),
+            "solar_irradiance": round(float(sim_env.solar_irradiance), 2),
+            "real_chiller_kwh": round(float(sim_env.real_chiller_kwh), 3),
             "discrete_state": int(d_state),
             "valve": round(float(sim_env.prev_action[0]), 3),
             "fan": round(float(sim_env.prev_action[1]), 3),
@@ -152,13 +160,14 @@ class GreenMindHandler(SimpleHTTPRequestHandler):
                 action = agents["Rule-Based"].act(obs, info_dict)
             elif agent_name == "PPO":
                 action, _, _ = agents["PPO"].act(obs, deterministic=True)
+            elif agent_name == "SAC":
+                action = agents["SAC"].act(obs, deterministic=True)
             elif agent_name == "Policy Iteration":
                 s_idx = classify_state(sim_env.t_in, sim_env.co2, 1 if sim_env.occupants > 0 else 0)
                 act_idx = agents["Policy Iteration"][s_idx] if s_idx < 6 else 0
-                mode_map = {0: [0.3, 0.4, 0.3], 1: [0.15, 0.25, 0.2], 2: [0.35, 0.7, 0.85]}
-                action = np.array(mode_map.get(act_idx, [0.3, 0.3, 0.3]), dtype=np.float32)
+                action = DISCRETE_ACTION_PHYSICAL_MAPPING.get(s_idx, {}).get(act_idx, np.array([0.2, 0.2, 0.2], dtype=np.float32))
             else:
-                action = np.array([0.3, 0.3, 0.3], dtype=np.float32)
+                action = np.array([0.25, 0.35, 0.25], dtype=np.float32)
 
             _, rew, term, trunc, info = sim_env.step(action)
             last_info = info
