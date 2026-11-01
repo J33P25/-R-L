@@ -1,9 +1,10 @@
 """
-GreenMind: Multi-Source Dataset Loader & Preprocessing Pipeline
-Synchronizes and aligns:
-1. Occupancy Detection data (Indoor T, RH, CO2, Binary Occ)
-2. Weather time-series (Outdoor T, Dew point, Cloud coverage, Wind)
-3. Energy Consumption data (Continuous Occupancy Headcount, Renewable Solar, Baseline Energy)
+GreenMind: Multi-Source Dataset Loader & Synchronization Pipeline
+Aligns and synchronizes:
+1. BDG2 Weather Time-Series (Outdoor dry-bulb T, dew point RH, wind speed, solar radiation)
+2. BDG2 Chilled Water Meter Data (Real measured commercial office cooling consumption)
+3. ASHRAE 90.1 Commercial Office Occupancy Schedules & Metabolic CO2 Emission Profiles
+All on a continuous, unified 15-minute time horizon (35,040 steps for 2016).
 """
 import sys
 from pathlib import Path
@@ -11,13 +12,17 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import pandas as pd
 import numpy as np
-from src.config import OCCUPANCY_DIR, WEATHER_FILE, ENERGY_FILE, DATA_EXPORT_DIR
+import pandas as pd
+from src.config import (
+    WEATHER_FILE, CHILLED_WATER_FILE, UNIFIED_TELEMETRY_FILE,
+    PRIMARY_OFFICE_BUILDING, BDG2_SITE_ID,
+    ZONE_MAX_CAPACITY, HUMAN_CO2_GEN_RATE
+)
 
-def calculate_relative_humidity(air_temp_c, dew_temp_c):
+def calculate_relative_humidity(air_temp_c: np.ndarray, dew_temp_c: np.ndarray) -> np.ndarray:
     """
-    Magnus-Tetens formula to compute relative humidity from air and dew temperatures.
+    Magnus-Tetens empirical formulation for ambient relative humidity from air and dew temperatures.
     """
     a = 17.27
     b = 237.7
@@ -26,129 +31,193 @@ def calculate_relative_humidity(air_temp_c, dew_temp_c):
     rh = 100.0 * np.exp(alpha_dew - alpha_air)
     return np.clip(rh, 5.0, 100.0)
 
-def load_occupancy_data():
+def calculate_solar_irradiance(datetimes: pd.DatetimeIndex, cloud_oktas: np.ndarray, latitude_deg: float = 28.5) -> np.ndarray:
     """
-    Loads and concatenates the UCI Occupancy Detection environmental time-series.
+    Computes global horizontal solar irradiance (W/m²) accounting for solar zenith angle
+    and Kasten-Czeplak cloud attenuation.
     """
-    files = ["datatraining.txt", "datatest.txt", "datatest2.txt"]
-    dfs = []
-    for f in files:
-        file_path = OCCUPANCY_DIR / f
-        if file_path.exists():
-            df = pd.read_csv(file_path, parse_dates=["date"])
-            dfs.append(df)
-    
-    if not dfs:
-        raise FileNotFoundError(f"No occupancy data found in {OCCUPANCY_DIR}")
-    
-    combined = pd.concat(dfs, ignore_index=True)
-    combined.sort_values(by="date", inplace=True)
-    combined.rename(columns={"date": "timestamp"}, inplace=True)
-    combined.drop_duplicates(subset=["timestamp"], inplace=True)
-    return combined
+    lat = np.radians(latitude_deg)
+    day_of_year = datetimes.dayofyear.values
+    hours = datetimes.hour.values + datetimes.minute.values / 60.0
 
-def load_weather_data(limit_rows=50000):
+    # Solar declination angle
+    dec = np.radians(23.45 * np.sin(np.radians((360.0 / 365.0) * (284.0 + day_of_year))))
+    # Solar hour angle (15 deg per hour from solar noon)
+    hour_angle = np.radians(15.0 * (hours - 12.0))
+
+    # Solar elevation angle
+    sin_elev = np.sin(lat) * np.sin(dec) + np.cos(lat) * np.cos(dec) * np.cos(hour_angle)
+    elev = np.maximum(0.0, sin_elev)
+
+    # Clear-sky horizontal irradiance (~1050 W/m² peak)
+    i_clear = 1050.0 * elev
+    cloud_frac = np.clip(np.nan_to_num(cloud_oktas, nan=3.0) / 8.0, 0.0, 1.0)
+    # Kasten-Czeplak cloud attenuation formula
+    i_solar = i_clear * (1.0 - 0.75 * (cloud_frac ** 3.4))
+    return np.where(elev > 0.0, i_solar, 0.0)
+
+def generate_ashrae_occupancy(datetimes: pd.DatetimeIndex, zone_capacity: int = ZONE_MAX_CAPACITY, seed: int = 42) -> np.ndarray:
     """
-    Loads outdoor weather observations and derives outdoor relative humidity.
+    Generates realistic commercial office occupancy headcounts following ASHRAE 90.1
+    standard commercial office schedules with stochastic Poisson noise.
+    """
+    np.random.seed(seed)
+    n = len(datetimes)
+    counts = np.zeros(n, dtype=int)
+
+    # ASHRAE Standard Commercial Office Profile (Hourly Multiplier)
+    weekday_profile = {
+        0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0,
+        6: 0.10, 7: 0.35, 8: 0.75, 9: 0.95, 10: 1.00, 11: 1.00,
+        12: 0.50, 13: 0.90, 14: 1.00, 15: 1.00, 16: 0.90, 17: 0.50,
+        18: 0.20, 19: 0.10, 20: 0.05, 21: 0.0, 22: 0.0, 23: 0.0
+    }
+    saturday_profile = {h: (0.15 if 8 <= h <= 13 else 0.0) for h in range(24)}
+    sunday_profile = {h: 0.0 for h in range(24)}
+
+    for i, dt in enumerate(datetimes):
+        dow = dt.dayofweek
+        h = dt.hour
+        if dow < 5:
+            frac = weekday_profile[h]
+        elif dow == 5:
+            frac = saturday_profile[h]
+        else:
+            frac = sunday_profile[h]
+
+        lam = frac * zone_capacity
+        if lam > 0.0:
+            counts[i] = int(np.random.poisson(lam))
+        else:
+            counts[i] = 0
+
+    return counts
+
+def load_bdg2_weather(year: str = "2016") -> pd.DataFrame:
+    """
+    Loads and cleans BDG2 weather observations for the target site.
     """
     if not WEATHER_FILE.exists():
-        raise FileNotFoundError(f"Weather file not found at {WEATHER_FILE}")
+        raise FileNotFoundError(f"BDG2 Weather file not found at {WEATHER_FILE}")
 
-    # Read site observations (Panther site or first available)
-    df = pd.read_csv(WEATHER_FILE, nrows=limit_rows, parse_dates=["timestamp"])
-    df.sort_values(by="timestamp", inplace=True)
-    df.drop_duplicates(subset=["timestamp"], inplace=True)
-    
-    # Fill or interpolate missing temperatures
-    df["airTemperature"] = df["airTemperature"].interpolate(method="linear").bfill().ffill()
-    df["dewTemperature"] = df["dewTemperature"].interpolate(method="linear").bfill().ffill()
-    df["cloudCoverage"] = df["cloudCoverage"].fillna(4.0) # Medium cloud cover default
-    df["windSpeed"] = df["windSpeed"].fillna(2.0)
-    
-    df["outdoor_humidity"] = calculate_relative_humidity(df["airTemperature"], df["dewTemperature"])
-    df.rename(columns={"airTemperature": "outdoor_temp", "cloudCoverage": "cloud_coverage", "windSpeed": "wind_speed"}, inplace=True)
-    return df[["timestamp", "outdoor_temp", "outdoor_humidity", "cloud_coverage", "wind_speed"]]
+    print(f"[DataLoader] Reading BDG2 weather telemetry from {WEATHER_FILE.name}...")
+    df_raw = pd.read_csv(WEATHER_FILE, parse_dates=["timestamp"])
+    site_df = df_raw[df_raw["site_id"] == BDG2_SITE_ID].copy()
+    site_df.drop_duplicates(subset=["timestamp"], inplace=True)
+    site_df.set_index("timestamp", inplace=True)
+    site_df.sort_index(inplace=True)
 
-def load_energy_data():
+    # Filter year
+    start_ts = f"{year}-01-01 00:00:00"
+    end_ts = f"{year}-12-31 23:00:00"
+    df_year = site_df.loc[start_ts:end_ts].copy()
+
+    # Clean and interpolate missing sensors
+    df_year["airTemperature"] = df_year["airTemperature"].interpolate(method="time").bfill().ffill()
+    df_year["dewTemperature"] = df_year["dewTemperature"].interpolate(method="time").bfill().ffill()
+    df_year["cloudCoverage"] = df_year["cloudCoverage"].interpolate(method="time").fillna(3.0)
+    df_year["windSpeed"] = df_year["windSpeed"].interpolate(method="time").fillna(2.0)
+
+    # Resample to 15-minute intervals with smooth spline/linear interpolation
+    resampled_15m = df_year[["airTemperature", "dewTemperature", "cloudCoverage", "windSpeed"]].resample("15min").interpolate(method="time")
+    resampled_15m.bfill(inplace=True)
+    resampled_15m.ffill(inplace=True)
+    return resampled_15m
+
+def load_bdg2_chilled_water(year: str = "2016") -> pd.DataFrame:
     """
-    Loads building energy consumption and occupancy headcount data.
+    Loads and cleans BDG2 chilled water meter consumption for office buildings.
     """
-    if not ENERGY_FILE.exists():
-        raise FileNotFoundError(f"Energy file not found at {ENERGY_FILE}")
+    if not CHILLED_WATER_FILE.exists():
+        raise FileNotFoundError(f"BDG2 Chilled Water file not found at {CHILLED_WATER_FILE}")
 
-    df = pd.read_csv(ENERGY_FILE, parse_dates=["Timestamp"])
-    df.rename(columns={
-        "Timestamp": "timestamp",
-        "Occupancy": "occupancy_headcount",
-        "EnergyConsumption": "baseline_energy_kwh",
-        "RenewableEnergy": "solar_renewable_kwh"
-    }, inplace=True)
-    df.sort_values(by="timestamp", inplace=True)
-    return df
+    print(f"[DataLoader] Reading BDG2 chilled water meter data from {CHILLED_WATER_FILE.name}...")
+    df_water = pd.read_csv(CHILLED_WATER_FILE, parse_dates=["timestamp"])
+    df_water.drop_duplicates(subset=["timestamp"], inplace=True)
+    df_water.set_index("timestamp", inplace=True)
+    df_water.sort_index(inplace=True)
 
-def build_unified_dataset():
-    """
-    Aligns and blends the datasets into an unified environmental replay dataframe.
-    """
-    out_file = DATA_EXPORT_DIR / "unified_building_telemetry.csv"
-    if out_file.exists():
-        return pd.read_csv(out_file, parse_dates=["timestamp"])
+    start_ts = f"{year}-01-01 00:00:00"
+    end_ts = f"{year}-12-31 23:00:00"
+    water_year = df_water.loc[start_ts:end_ts].copy()
 
-    occ_df = load_occupancy_data()
-    weather_df = load_weather_data()
-    energy_df = load_energy_data()
-
-    # Re-sample occupancy to 15-minute / hourly intervals for long-horizon simulation
-    occ_resampled = occ_df.set_index("timestamp").resample("15min").agg({
-        "Temperature": "mean",
-        "Humidity": "mean",
-        "CO2": "mean",
-        "Occupancy": "max"
-    }).dropna().reset_index()
-
-    # Weather sequence
-    weather_series = weather_df.set_index("timestamp").resample("15min").interpolate().dropna().reset_index()
-
-    # Create composite synthetic aligned time-frame
-    n_rows = min(len(occ_resampled), len(weather_series))
-    merged = occ_resampled.iloc[:n_rows].copy()
-    
-    # Attach weather
-    merged["outdoor_temp"] = weather_series["outdoor_temp"].iloc[:n_rows].values
-    merged["outdoor_humidity"] = weather_series["outdoor_humidity"].iloc[:n_rows].values
-    merged["cloud_coverage"] = weather_series["cloud_coverage"].iloc[:n_rows].values
-
-    # Attach energy profiles
-    if len(energy_df) > 0:
-        energy_cycle = energy_df["baseline_energy_kwh"].values
-        renew_cycle = energy_df["solar_renewable_kwh"].values
-        headcount_cycle = energy_df["occupancy_headcount"].values
-
-        merged["baseline_energy_kwh"] = np.resize(energy_cycle, n_rows)
-        merged["solar_renewable_kwh"] = np.resize(renew_cycle, n_rows)
-        # Combine binary occupancy with integer headcounts: if binary is 1, take headcount >= 1
-        raw_headcount = np.resize(headcount_cycle, n_rows)
-        merged["occupants_count"] = np.where(merged["Occupancy"] > 0, np.maximum(raw_headcount, 1), 0)
+    # Primary target office building
+    if PRIMARY_OFFICE_BUILDING in water_year.columns:
+        target_series = water_year[PRIMARY_OFFICE_BUILDING].interpolate(method="time").bfill().ffill()
     else:
-        merged["baseline_energy_kwh"] = 25.0
-        merged["solar_renewable_kwh"] = 5.0
-        merged["occupants_count"] = merged["Occupancy"] * 5
+        # Fallback to first available office column
+        office_cols = [c for c in water_year.columns if "office" in c]
+        target_series = water_year[office_cols[0]].interpolate(method="time").bfill().ffill()
 
-    # Renaming for clean access
-    merged.rename(columns={
-        "Temperature": "indoor_temp",
-        "Humidity": "indoor_humidity",
-        "CO2": "co2_ppm",
-        "Occupancy": "occupancy_binary"
-    }, inplace=True)
+    # Ensemble cluster mean across all office buildings for macro comparison
+    office_cols = [c for c in water_year.columns if f"{BDG2_SITE_ID}_office" in c]
+    if office_cols:
+        cluster_mean = water_year[office_cols].mean(axis=1).interpolate(method="time").bfill().ffill()
+    else:
+        cluster_mean = target_series.copy()
 
-    # Save to processed data folder
-    merged.to_csv(out_file, index=False)
-    print(f"[DataLoader] Successfully unified {len(merged)} timesteps saved to {out_file}")
-    return merged
+    combined = pd.DataFrame({
+        "real_chiller_kwh": target_series,
+        "cluster_chiller_kwh": cluster_mean
+    })
+
+    # Resample to 15-minute intervals (hourly meter reading distributed evenly over four 15-min intervals)
+    resampled_15m = combined.resample("15min").interpolate(method="time") / 4.0
+    resampled_15m.bfill(inplace=True)
+    resampled_15m.ffill(inplace=True)
+    return resampled_15m
+
+def build_unified_dataset(force_rebuild: bool = False) -> pd.DataFrame:
+    """
+    Builds a single, synchronized, physically consistent building telemetry dataset.
+    """
+    if UNIFIED_TELEMETRY_FILE.exists() and not force_rebuild:
+        print(f"[DataLoader] Loading existing synchronized dataset from {UNIFIED_TELEMETRY_FILE}...")
+        df = pd.read_csv(UNIFIED_TELEMETRY_FILE, parse_dates=["timestamp"])
+        return df
+
+    print("\n[DataLoader] >>> Constructing Synchronized BDG2 Telemetry Dataset (2016)...")
+    weather_15m = load_bdg2_weather("2016")
+    water_15m = load_bdg2_chilled_water("2016")
+
+    # Inner join on timestamps
+    merged = weather_15m.join(water_15m, how="inner")
+    dts = merged.index
+
+    # Physics computations
+    outdoor_temp = merged["airTemperature"].values
+    dew_temp = merged["dewTemperature"].values
+    cloud_cov = merged["cloudCoverage"].values
+    wind_spd = merged["windSpeed"].values
+
+    outdoor_humidity = calculate_relative_humidity(outdoor_temp, dew_temp)
+    solar_irradiance = calculate_solar_irradiance(dts, cloud_cov)
+    occupants = generate_ashrae_occupancy(dts, zone_capacity=ZONE_MAX_CAPACITY)
+    occupancy_binary = (occupants > 0).astype(int)
+    co2_emission_rate = occupants * HUMAN_CO2_GEN_RATE
+
+    df_clean = pd.DataFrame({
+        "timestamp": dts,
+        "outdoor_temp": np.round(outdoor_temp, 2),
+        "outdoor_humidity": np.round(outdoor_humidity, 2),
+        "cloud_coverage": np.round(cloud_cov, 1),
+        "wind_speed": np.round(wind_spd, 2),
+        "solar_irradiance": np.round(solar_irradiance, 2),
+        "occupants_count": occupants,
+        "occupancy_binary": occupancy_binary,
+        "co2_emission_rate_lps": np.round(co2_emission_rate, 4),
+        "real_chiller_kwh": np.round(merged["real_chiller_kwh"].values, 4),
+        "cluster_chiller_kwh": np.round(merged["cluster_chiller_kwh"].values, 4)
+    })
+
+    df_clean.to_csv(UNIFIED_TELEMETRY_FILE, index=False)
+    print(f"[DataLoader] >>> Successfully generated {len(df_clean)} synchronized timesteps.")
+    print(f"[DataLoader] Saved to {UNIFIED_TELEMETRY_FILE}")
+    return df_clean
 
 if __name__ == "__main__":
-    df = build_unified_dataset()
+    df = build_unified_dataset(force_rebuild=True)
+    print("\n--- Summary Statistics ---")
+    print(df[["outdoor_temp", "outdoor_humidity", "solar_irradiance", "occupants_count", "real_chiller_kwh"]].describe())
+    print("\n--- First 5 Timesteps ---")
     print(df.head())
-    print("\nSummary Statistics:")
-    print(df[["indoor_temp", "indoor_humidity", "co2_ppm", "outdoor_temp", "occupants_count"]].describe())
