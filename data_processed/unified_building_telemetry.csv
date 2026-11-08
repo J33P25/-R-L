@@ -1,4 +1,4 @@
-timestamp,outdoor_temp,outdoor_humidity,cloud_coverage,wind_speed,solar_irradiance,occupants_count,occupancy_binary,co2_emission_rate_lps,real_chiller_kwh,cluster_chiller_kwh
+for timestamp,outdoor_temp,outdoor_humidity,cloud_coverage,wind_speed,solar_irradiance,occupants_count,occupancy_binary,co2_emission_rate_lps,real_chiller_kwh,cluster_chiller_kwh
 2016-01-01 00:00:00,19.4,100.0,3.0,0.0,0.0,0,0,0.0,0.0,18.927
 2016-01-01 00:15:00,19.82,100.0,3.8,0.0,0.0,0,0,0.0,0.0,20.662
 2016-01-01 00:30:00,20.25,100.0,4.5,0.0,0.0,0,0,0.0,0.0,22.397
